@@ -1,0 +1,134 @@
+const express = require("express");
+const cors = require("cors");
+require("dotenv").config();
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const app = express();
+const port = process.env.PORT || 5000;
+
+// middleware
+app.use(
+  cors({
+    origin: ["http://localhost:5173"],
+    credentials: true,
+  })
+);
+app.use(express.json());
+app.use(cookieParser());
+
+app.get("/", (req, res) => {
+  res.send("mediCamp server is running...");
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
+
+// JWT middleware
+const verifyToken = (req, res, next) => {
+  const token = req.cookies?.token;
+  if (!token) {
+    return res.status(401).json({ message: "No token, authorization denied" });
+  }
+
+  // Verify token
+  jwt.verify(token, process.env.ACCESS_TOKEN, (error, decoded) => {
+    if (error) {
+      return res.status(401).json({ message: "Token verification failed" });
+    }
+    req.user = decoded;
+    next();
+  });
+};
+
+// MongoDB connection
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.a8qb8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+});
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    // await client.connect();
+    // Send a ping to confirm a successful connection
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
+
+    // jwt authentication
+    app.post("/jwt", (req, res) => {
+      const { email, name, picture } = req.body;
+      const token = jwt.sign(
+        { email, name, picture },
+        process.env.ACCESS_TOKEN,
+        {
+          expiresIn: "24h",
+        }
+      );
+
+      res
+        .cookie("token", token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        })
+        .send({ success: true });
+    });
+
+    app.post("/logout", (req, res) => {
+      res
+        .clearCookie("token", {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        })
+        .send({ success: true });
+    });
+
+    // user database
+    const userCollection = client.db("mediCamp").collection("users");
+    app.get("/users", async (req, res) => {
+      const cursor = userCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    app.get("/user", async (req, res) => {
+      const { email } = req.query;
+      const user = await userCollection.findOne({ email });
+      res.json({ exists: !!user });
+    });
+
+    app.post("/users", async (req, res) => {
+      const newUser = req.body;
+      const result = await userCollection.insertOne(newUser);
+      res.send(result);
+    });
+
+    // popular medical camps
+    const popularCollection = client.db("mediCamp").collection("camps");
+    app.get("/popularcamps", async (req, res) => {
+      const cursor = popularCollection
+        .find()
+        .sort({ participantCount: -1 })
+        .limit(6);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    // Function ends here
+  } finally {
+    // Ensures that the client will close when you finish/error
+    // await client.close();
+  }
+}
+run().catch(console.dir);
