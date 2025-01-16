@@ -55,80 +55,109 @@ const client = new MongoClient(uri, {
 });
 
 async function run() {
-  try {
-    // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
-    // Send a ping to confirm a successful connection
-    // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!"
-    // );
+  // jwt authentication
+  app.post("/jwt", (req, res) => {
+    const { email, name, picture } = req.body;
+    const token = jwt.sign({ email, name, picture }, process.env.ACCESS_TOKEN, {
+      expiresIn: "24h",
+    });
 
-    // jwt authentication
-    app.post("/jwt", (req, res) => {
-      const { email, name, picture } = req.body;
-      const token = jwt.sign(
-        { email, name, picture },
-        process.env.ACCESS_TOKEN,
-        {
-          expiresIn: "24h",
-        }
+    res
+      .cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+      })
+      .send({ success: true });
+  });
+
+  app.post("/logout", (req, res) => {
+    res
+      .clearCookie("token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+      })
+      .send({ success: true });
+  });
+
+  // user database
+  const userCollection = client.db("mediCamp").collection("users");
+  app.get("/users", async (req, res) => {
+    const cursor = userCollection.find();
+    const result = await cursor.toArray();
+    res.send(result);
+  });
+
+  app.get("/user", async (req, res) => {
+    const { email } = req.query;
+    const user = await userCollection.findOne({ email });
+    res.json({ exists: !!user });
+  });
+
+  app.post("/users", async (req, res) => {
+    const newUser = req.body;
+    const result = await userCollection.insertOne(newUser);
+    res.send(result);
+  });
+
+  // popular medical camps
+  const campCollection = client.db("mediCamp").collection("camps");
+  app.get("/popularcamps", async (req, res) => {
+    const cursor = campCollection
+      .find()
+      .sort({ participantCount: -1 })
+      .limit(6);
+    const result = await cursor.toArray();
+    res.send(result);
+  });
+
+  // all camps databases
+  app.get("/camps", async (req, res) => {
+    const cursor = campCollection.find();
+    const result = await cursor.toArray();
+    res.send(result);
+  });
+
+  app.get("/camps/:id", async (req, res) => {
+    const { id } = req.params;
+    const query = { _id: new ObjectId(id) };
+    const result = await campCollection.findOne(query);
+    res.send(result);
+  });
+
+  // joined participants database
+  const participantCollection = client
+    .db("mediCamp")
+    .collection("joinedParticipants");
+
+  // Add participant registration
+  app.post("/joinedParticipant", async (req, res) => {
+    const registrationData = req.body;
+    const result = await participantCollection.insertOne(registrationData);
+    res.status(201).send({
+      success: true,
+      message: "Participant registered successfully",
+      result,
+    });
+  });
+
+  // Increment participant count
+  app.patch("/camps/:id/increment", async (req, res) => {
+    const { id } = req.params;
+
+      const result = await campCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $inc: { participantCount: 1 } }
       );
 
-      res
-        .cookie("token", token, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-        })
-        .send({ success: true });
-    });
-
-    app.post("/logout", (req, res) => {
-      res
-        .clearCookie("token", {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-        })
-        .send({ success: true });
-    });
-
-    // user database
-    const userCollection = client.db("mediCamp").collection("users");
-    app.get("/users", async (req, res) => {
-      const cursor = userCollection.find();
-      const result = await cursor.toArray();
-      res.send(result);
-    });
-
-    app.get("/user", async (req, res) => {
-      const { email } = req.query;
-      const user = await userCollection.findOne({ email });
-      res.json({ exists: !!user });
-    });
-
-    app.post("/users", async (req, res) => {
-      const newUser = req.body;
-      const result = await userCollection.insertOne(newUser);
-      res.send(result);
-    });
-
-    // popular medical camps
-    const popularCollection = client.db("mediCamp").collection("camps");
-    app.get("/popularcamps", async (req, res) => {
-      const cursor = popularCollection
-        .find()
-        .sort({ participantCount: -1 })
-        .limit(6);
-      const result = await cursor.toArray();
-      res.send(result);
-    });
-
-    // Function ends here
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
-  }
+      if (result.modifiedCount === 1) {
+        res.send({ success: true, message: "Participant count incremented" });
+      } else {
+        res.status(404).send({ success: false, message: "Camp not found" });
+      }
+    
+  });
+  // Function ends here
 }
 run().catch(console.dir);
