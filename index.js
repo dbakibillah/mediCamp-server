@@ -193,6 +193,31 @@ async function run() {
     }
   });
 
+  // Update Camp
+  app.put("/update-camp/:id", async (req, res) => {
+    const { id } = req.params;
+    const updatedData = req.body;
+
+    delete updatedData._id;
+    const result = await campCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedData }
+    );
+
+    if (result.matchedCount === 1) {
+      res.status(200).send({
+        success: true,
+        message: "Camp updated successfully",
+        result,
+      });
+    } else {
+      res.status(404).send({
+        success: false,
+        message: "Camp not found",
+      });
+    }
+  });
+
   // joined participants database
   const participantCollection = client
     .db("mediCamp")
