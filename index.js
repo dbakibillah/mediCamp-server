@@ -158,6 +158,17 @@ async function run() {
     res.send(result);
   });
 
+  // add a camp
+  app.post("/camps", async (req, res) => {
+    const campData = req.body;
+    const result = await campCollection.insertOne(campData);
+    if (result.insertedId) {
+      res.status(201).json({ insertedId: result.insertedId });
+    } else {
+      res.status(400).json({ message: "Failed to add camp" });
+    }
+  });
+
   // joined participants database
   const participantCollection = client
     .db("mediCamp")
