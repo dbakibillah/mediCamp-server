@@ -169,6 +169,30 @@ async function run() {
     }
   });
 
+  // Delete Camp
+  app.delete("/delete-camp/:campId", async (req, res) => {
+    const { campId } = req.params;
+
+    try {
+      const result = await campCollection.deleteOne({
+        _id: new ObjectId(campId),
+      });
+
+      if (result.deletedCount > 0) {
+        res
+          .status(200)
+          .json({ message: "Camp deleted successfully", deleted: true });
+      } else {
+        res.status(404).json({ message: "Camp not found", deleted: false });
+      }
+    } catch (error) {
+      console.error("Error deleting camp:", error);
+      res
+        .status(500)
+        .json({ message: "Internal server error", deleted: false });
+    }
+  });
+
   // joined participants database
   const participantCollection = client
     .db("mediCamp")
