@@ -95,10 +95,42 @@ async function run() {
     res.json({ exists: !!user });
   });
 
+  app.get("/user-type", async (req, res) => {
+    const { email } = req.query;
+    const user = await userCollection.findOne({ email });
+    if (user) {
+      res.json(user);
+    } else {
+      res.status(404).send({ message: "User not found" });
+    }
+  });
+
   app.post("/users", async (req, res) => {
     const newUser = req.body;
+    newUser.type = "participant";
     const result = await userCollection.insertOne(newUser);
     res.send(result);
+  });
+
+  // organizer update profile
+  app.get("/user/:email", async (req, res) => {
+    const email = req.params.email;
+    const user = await userCollection.findOne({ email });
+    if (user) {
+      res.status(200).json(user);
+    } else {
+      res.status(404).json({ message: "User not found" });
+    }
+  });
+
+  app.put("/user/:email", async (req, res) => {
+    const { email } = req.params;
+    const updatedData = req.body;
+    const result = await userCollection.updateOne(
+      { email },
+      { $set: updatedData }
+    );
+    res.json(result);
   });
 
   // popular medical camps
@@ -146,17 +178,16 @@ async function run() {
   app.patch("/camps/:id/increment", async (req, res) => {
     const { id } = req.params;
 
-      const result = await campCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $inc: { participantCount: 1 } }
-      );
+    const result = await campCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $inc: { participantCount: 1 } }
+    );
 
-      if (result.modifiedCount === 1) {
-        res.send({ success: true, message: "Participant count incremented" });
-      } else {
-        res.status(404).send({ success: false, message: "Camp not found" });
-      }
-    
+    if (result.modifiedCount === 1) {
+      res.send({ success: true, message: "Participant count incremented" });
+    } else {
+      res.status(404).send({ success: false, message: "Camp not found" });
+    }
   });
   // Function ends here
 }
