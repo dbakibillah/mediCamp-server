@@ -296,6 +296,30 @@ async function run() {
       res.status(404).send({ success: false, message: "Camp not found" });
     }
   });
+
+  // Participant's Analytics
+  // Fetch registered camps for a participant
+  app.get("/analytics/:email", async (req, res) => {
+    const { email } = req.params;
+    if (!email) {
+        return res.status(400).send({ success: false, message: "Email is required." });
+    }
+
+    try {
+      const participantCamps = await participantCollection.find({ participantEmail: email }).toArray();
+
+        if (participantCamps.length > 0) {
+            res.status(200).send(participantCamps);
+        } else {
+            res.status(404).send({ success: false, message: "No registered camps found." });
+        }
+    } catch (error) {
+        console.error("Error fetching analytics data:", error);
+        res.status(500).send({ success: false, message: "Internal server error." });
+    }
+});
+
+
   // Function ends here
 }
 
