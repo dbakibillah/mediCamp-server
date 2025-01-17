@@ -298,27 +298,95 @@ async function run() {
   });
 
   // Participant's Analytics
-  // Fetch registered camps for a participant
   app.get("/analytics/:email", async (req, res) => {
     const { email } = req.params;
     if (!email) {
-        return res.status(400).send({ success: false, message: "Email is required." });
+      return res
+        .status(400)
+        .send({ success: false, message: "Email is required." });
     }
 
-    try {
-      const participantCamps = await participantCollection.find({ participantEmail: email }).toArray();
+    const participantCamps = await participantCollection
+      .find({ participantEmail: email })
+      .toArray();
 
-        if (participantCamps.length > 0) {
-            res.status(200).send(participantCamps);
-        } else {
-            res.status(404).send({ success: false, message: "No registered camps found." });
-        }
-    } catch (error) {
-        console.error("Error fetching analytics data:", error);
-        res.status(500).send({ success: false, message: "Internal server error." });
+    if (participantCamps.length > 0) {
+      res.status(200).send(participantCamps);
+    } else {
+      res
+        .status(404)
+        .send({ success: false, message: "No registered camps found." });
     }
-});
+  });
 
+  // Get all camps registered by a participant
+  app.get("/registered-camps/:email", async (req, res) => {
+    const { email } = req.params;
+    const result = await participantCollection
+      .find({ participantEmail: email })
+      .toArray();
+    res.status(200).send(result);
+  });
+
+  // Cancel registration
+  app.delete("/cancel-registration/:id", async (req, res) => {
+    const { id } = req.params;
+
+    const registration = await participantCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!registration) {
+      return res.status(404).send({ success: false, message: "Not found" });
+    }
+
+    if (registration.paymentStatus === "Paid") {
+      return res.status(400).send({
+        success: false,
+        message: "Cannot cancel a paid registration",
+      });
+    }
+
+    const result = await participantCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount > 0) {
+      res.status(200).send({ success: true, message: "Registration canceled" });
+    } else {
+      res.status(500).send({ success: false, message: "Cancellation failed" });
+    }
+  });
+
+  // Get feedback for home page
+  const feedbackCollection = client.db("mediCamp").collection("feedback");
+  app.get("/feedback", async (req, res) => {
+    const feedbacks = await feedbackCollection.find().toArray();
+    res.status(200).send(feedbacks);
+  });
+
+  // Submit feedback
+  app.post("/submit-feedback", async (req, res) => {
+    const { campId, participantEmail, rating, feedback } = req.body;
+
+    const feedbackData = {
+      campId,
+      participantEmail,
+      rating,
+      feedback,
+      date: new Date(),
+    };
+
+    const result = await feedbackCollection.insertOne(feedbackData);
+
+    if (result.insertedId) {
+      res.status(201).send({ success: true, message: "Feedback submitted" });
+    } else {
+      res
+        .status(400)
+        .send({ success: false, message: "Failed to submit feedback" });
+    }
+  });
 
   // Function ends here
 }
