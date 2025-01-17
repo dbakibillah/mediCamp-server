@@ -234,6 +234,53 @@ async function run() {
     });
   });
 
+  // Get participant registrations
+  app.get("/participants", async (req, res) => {
+    const cursor = participantCollection.find();
+    const result = await cursor.toArray();
+    res.send(result);
+  });
+
+  // Delete participant
+  app.delete("/cancel-registration/:id", async (req, res) => {
+    const { id } = req.params;
+    const result = await participantCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount > 0) {
+      res.send({
+        success: true,
+        message: "Participant deleted successfully",
+      });
+    } else {
+      res.status(404).send({
+        success: false,
+        message: "Participant not found",
+      });
+    }
+  });
+
+  // Update participant pending status
+  app.put("/confirm-registration/:id", async (req, res) => {
+    const { id } = req.params;
+    const result = await participantCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { confirmationStatus: "Confirmed" } }
+    );
+    if (result.matchedCount === 1) {
+      res.status(200).send({
+        success: true,
+        message: "Participant confirmed successfully",
+      });
+    } else {
+      res.status(404).send({
+        success: false,
+        message: "Participant not found",
+      });
+    }
+  });
+
   // Increment participant count
   app.patch("/camps/:id/increment", async (req, res) => {
     const { id } = req.params;
@@ -251,4 +298,5 @@ async function run() {
   });
   // Function ends here
 }
+
 run().catch(console.dir);
