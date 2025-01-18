@@ -3,6 +3,7 @@ const cors = require("cors");
 require("dotenv").config();
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 5000;
@@ -388,7 +389,126 @@ async function run() {
     }
   });
 
+  // Payment request **************************************************************
+  const paymentCollection = client.db("mediCamp").collection("payments");
+  app.get("/payment/:id", async (req, res) => {
+    const { id } = req.params;
+    const result = await participantCollection.findOne({
+      _id: new ObjectId(id),
+    });
+    if (result) {
+      res.status(200).send(result);
+    } else {
+      res
+        .status(404)
+        .send({ success: false, message: "Participant not found" });
+    }
+  });
+
+  // app.post("/payments", async (req, res) => {
+  //   const payment = req.body;
+  //   const result = await paymentCollection.insertOne(payment);
+  //   if (result.insertedId) {
+  //     res.status(201).send({ success: true, message: "Payment successful" });
+  //   } else {
+  //     res.status(500).send({ success: false, message: "Payment failed" });
+  //   }
+  // });
+
   // Function ends here
+  // Payment collection
+  // Stripe Payment Intent
+  app.post("/create-payment-intent", async (req, res) => {
+    const { amount } = req.body;
+
+    if (!amount || isNaN(amount)) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Invalid amount" });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // Amount in cents
+      currency: "usd",
+      payment_method_types: ["card"],
+    });
+
+    res.send({
+      success: true,
+      clientSecret: paymentIntent.client_secret,
+    });
+  });
+
+  // Handle payment and store payment history
+  app.post("/make-payment", async (req, res) => {
+    const { email, campId, amount, transactionId } = req.body;
+
+    if (!email || !campId || !amount || !transactionId) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Missing required fields" });
+    }
+
+    const paymentRecord = {
+      participantEmail: email,
+      joinedCampId: new ObjectId(campId),
+      amount,
+      transactionId,
+      date: new Date(),
+    };
+
+    const paymentResult = await paymentCollection.insertOne(paymentRecord);
+
+    if (paymentResult.insertedId) {
+      res.status(201).send({ success: true, message: "Payment successful" });
+    } else {
+      res.status(500).send({ success: false, message: "Payment failed" });
+    }
+  });
+
+  // Update payment status (participant)
+  app.put("/update-payment-status/:id", async (req, res) => {
+    const { id } = req.params;
+    const { paymentStatus } = req.body;
+
+    const result = await participantCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { paymentStatus } }
+    );
+
+    if (result.modifiedCount === 1) {
+      res.status(200).send({ success: true, message: "Status updated" });
+    } else {
+      res
+        .status(404)
+        .send({ success: false, message: "Registration not found" });
+    }
+  });
+
+  // Update confirmation status (organizer)
+  app.put("/update-confirmation/:id", async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const result = await participantCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { confirmationStatus: "Confirmed" } }
+      );
+
+      if (result.modifiedCount === 1) {
+        res.status(200).send({ success: true, message: "Status updated" });
+      } else {
+        res
+          .status(404)
+          .send({ success: false, message: "Registration not found" });
+      }
+    } catch (error) {
+      console.error(error);
+      res
+        .status(500)
+        .send({ success: false, message: "Internal Server Error" });
+    }
+  });
 }
 
 run().catch(console.dir);
