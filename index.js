@@ -368,18 +368,25 @@ async function run() {
 
   // Submit feedback
   app.post("/submit-feedback", async (req, res) => {
-    const { campId, participantEmail, rating, feedback } = req.body;
+    const {
+      campId,
+      email: participantEmail,
+      rating,
+      feedback,
+      userName,
+      photoURL,
+    } = req.body;
 
     const feedbackData = {
       campId,
       participantEmail,
       rating,
       feedback,
+      userName,
+      photoURL,
       date: new Date(),
     };
-
     const result = await feedbackCollection.insertOne(feedbackData);
-
     if (result.insertedId) {
       res.status(201).send({ success: true, message: "Feedback submitted" });
     } else {
@@ -389,7 +396,7 @@ async function run() {
     }
   });
 
-  // Payment request **************************************************************
+  // Payment request
   const paymentCollection = client.db("mediCamp").collection("payments");
   app.get("/payment/:id", async (req, res) => {
     const { id } = req.params;
@@ -405,18 +412,6 @@ async function run() {
     }
   });
 
-  // app.post("/payments", async (req, res) => {
-  //   const payment = req.body;
-  //   const result = await paymentCollection.insertOne(payment);
-  //   if (result.insertedId) {
-  //     res.status(201).send({ success: true, message: "Payment successful" });
-  //   } else {
-  //     res.status(500).send({ success: false, message: "Payment failed" });
-  //   }
-  // });
-
-  // Function ends here
-  // Payment collection
   // Stripe Payment Intent
   app.post("/create-payment-intent", async (req, res) => {
     const { amount } = req.body;
@@ -441,7 +436,7 @@ async function run() {
 
   // Handle payment and store payment history
   app.post("/make-payment", async (req, res) => {
-    const { email, campId, amount, transactionId } = req.body;
+    const { email, campId, campName, amount, transactionId } = req.body;
 
     if (!email || !campId || !amount || !transactionId) {
       return res
@@ -452,6 +447,7 @@ async function run() {
     const paymentRecord = {
       participantEmail: email,
       joinedCampId: new ObjectId(campId),
+      campName,
       amount,
       transactionId,
       date: new Date(),
@@ -509,6 +505,22 @@ async function run() {
         .send({ success: false, message: "Internal Server Error" });
     }
   });
+
+  // Fetch payment history by participant email
+  app.get("/payment-history/:email", async (req, res) => {
+    const { email } = req.params;
+    const payments = await paymentCollection
+      .find({ participantEmail: email })
+      .toArray();
+
+    if (payments.length > 0) {
+      res.status(200).send({ success: true, data: payments });
+    } else {
+      res.status(404).send({ success: false, message: "No payments found" });
+    }
+  });
+
+  // Function ends here *****************************************************************************
 }
 
 run().catch(console.dir);
