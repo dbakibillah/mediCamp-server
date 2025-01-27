@@ -28,17 +28,16 @@ app.listen(port, () => {
 
 // JWT middleware
 const verifyToken = (req, res, next) => {
-  const token = req.cookies?.token;
-  if (!token) {
-    return res.status(401).json({ message: "No token, authorization denied" });
+  if (!req.headers.authorization) {
+    return res.status(401).send({ message: "unauthorized access" });
   }
-
-  // Verify token
-  jwt.verify(token, process.env.ACCESS_TOKEN, (error, decoded) => {
-    if (error) {
-      return res.status(401).json({ message: "Token verification failed" });
+  const token = req.headers.authorization.split(" ")[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN, (err, decoded) => {
+    if (err) {
+      console.log(err);
+      return res.status(401).send({ message: "unauthorized access" });
     }
-    req.user = decoded;
+    req.decoded = decoded;
     next();
   });
 };
@@ -69,7 +68,7 @@ async function run() {
         secure: process.env.NODE_ENV === "production",
         sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
       })
-      .send({ success: true });
+      .send({ success: true, token });
   });
 
   app.post("/logout", (req, res) => {
@@ -84,6 +83,18 @@ async function run() {
 
   // user database
   const userCollection = client.db("mediCamp").collection("users");
+  // use verify admin
+  const verifyAdmin = async (req, res, next) => {
+    const email = req.decoded.email;
+    const query = { email: email };
+    const user = await userCollection.findOne(query);
+    const isAdmin = user?.type === "organizer";
+    if (!isAdmin) {
+      return res.status(403).send({ message: "forbidden access" });
+    }
+    next();
+  };
+
   app.get("/users", async (req, res) => {
     const cursor = userCollection.find();
     const result = await cursor.toArray();
@@ -114,7 +125,7 @@ async function run() {
   });
 
   // organizer update profile
-  app.get("/user/:email", async (req, res) => {
+  app.get("/user/:email", verifyToken, async (req, res) => {
     const email = req.params.email;
     const user = await userCollection.findOne({ email });
     if (user) {
@@ -145,8 +156,22 @@ async function run() {
     res.send(result);
   });
 
+  // camp statistics(Public)
+  app.get("/camps-stat", async (req, res) => {
+    const cursor = campCollection.find();
+    const result = await cursor.toArray();
+    res.send(result);
+  });
+
   // all camps databases
-  app.get("/camps", async (req, res) => {
+  app.get("/available-camps", async (req, res) => {
+    const cursor = campCollection.find();
+    const result = await cursor.toArray();
+    res.send(result);
+  });
+
+  // for manage camps databases (organizer dashboard)
+  app.get("/camps", verifyToken, verifyAdmin, async (req, res) => {
     const cursor = campCollection.find();
     const result = await cursor.toArray();
     res.send(result);
@@ -159,9 +184,12 @@ async function run() {
     res.send(result);
   });
 
-  // add a camp
-  app.post("/camps", async (req, res) => {
+  // add a camp to database (organizer)
+  app.post("/camps", verifyToken, verifyAdmin, async (req, res) => {
     const campData = req.body;
+    if (!campData.campName || !campData.location || !campData.dateTime) {
+      return res.status(400).json({ message: "Missing required camp details" });
+    }
     const result = await campCollection.insertOne(campData);
     if (result.insertedId) {
       res.status(201).json({ insertedId: result.insertedId });
@@ -170,32 +198,37 @@ async function run() {
     }
   });
 
-  // Delete Camp
-  app.delete("/delete-camp/:campId", async (req, res) => {
-    const { campId } = req.params;
+  // Delete Camp (organizer)
+  app.delete(
+    "/delete-camp/:campId",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      const { campId } = req.params;
 
-    try {
-      const result = await campCollection.deleteOne({
-        _id: new ObjectId(campId),
-      });
+      try {
+        const result = await campCollection.deleteOne({
+          _id: new ObjectId(campId),
+        });
 
-      if (result.deletedCount > 0) {
+        if (result.deletedCount > 0) {
+          res
+            .status(200)
+            .json({ message: "Camp deleted successfully", deleted: true });
+        } else {
+          res.status(404).json({ message: "Camp not found", deleted: false });
+        }
+      } catch (error) {
+        console.error("Error deleting camp:", error);
         res
-          .status(200)
-          .json({ message: "Camp deleted successfully", deleted: true });
-      } else {
-        res.status(404).json({ message: "Camp not found", deleted: false });
+          .status(500)
+          .json({ message: "Internal server error", deleted: false });
       }
-    } catch (error) {
-      console.error("Error deleting camp:", error);
-      res
-        .status(500)
-        .json({ message: "Internal server error", deleted: false });
     }
-  });
+  );
 
-  // Update Camp
-  app.put("/update-camp/:id", async (req, res) => {
+  // Update Camp (organizer)
+  app.put("/update-camp/:id", verifyToken, verifyAdmin, async (req, res) => {
     const { id } = req.params;
     const updatedData = req.body;
 
@@ -225,7 +258,7 @@ async function run() {
     .collection("joinedParticipants");
 
   // Add participant registration
-  app.post("/joinedParticipant", async (req, res) => {
+  app.post("/joinedParticipant", verifyToken, async (req, res) => {
     const registrationData = req.body;
     const result = await participantCollection.insertOne(registrationData);
     res.status(201).send({
@@ -236,51 +269,61 @@ async function run() {
   });
 
   // Get participant registrations
-  app.get("/participants", async (req, res) => {
+  app.get("/participants", verifyToken, verifyAdmin, async (req, res) => {
     const cursor = participantCollection.find();
     const result = await cursor.toArray();
     res.send(result);
   });
 
-  // Delete participant
-  app.delete("/cancel-registration/:id", async (req, res) => {
-    const { id } = req.params;
-    const result = await participantCollection.deleteOne({
-      _id: new ObjectId(id),
-    });
+  // Delete participant (organizer dashboard)
+  app.delete(
+    "/cancel-registration/:id",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      const { id } = req.params;
+      const result = await participantCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
 
-    if (result.deletedCount > 0) {
-      res.send({
-        success: true,
-        message: "Participant deleted successfully",
-      });
-    } else {
-      res.status(404).send({
-        success: false,
-        message: "Participant not found",
-      });
+      if (result.deletedCount > 0) {
+        res.send({
+          success: true,
+          message: "Participant deleted successfully",
+        });
+      } else {
+        res.status(404).send({
+          success: false,
+          message: "Participant not found",
+        });
+      }
     }
-  });
+  );
 
   // Update participant pending status
-  app.put("/confirm-registration/:id", async (req, res) => {
-    const { id } = req.params;
-    const result = await participantCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { confirmationStatus: "Confirmed" } }
-    );
-    if (result.matchedCount === 1) {
-      res.status(200).send({
-        success: true,
-        message: "Participant confirmed successfully",
-      });
-    } else {
-      res.status(404).send({
-        success: false,
-        message: "Participant not found",
-      });
+  app.put(
+    "/confirm-registration/:id",
+    verifyToken,
+    verifyAdmin,
+    async (req, res) => {
+      const { id } = req.params;
+      const result = await participantCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { confirmationStatus: "Confirmed" } }
+      );
+      if (result.matchedCount === 1) {
+        res.status(200).send({
+          success: true,
+          message: "Participant confirmed successfully",
+        });
+      } else {
+        res.status(404).send({
+          success: false,
+          message: "Participant not found",
+        });
+      }
     }
-  });
+  );
 
   // Increment participant count
   app.patch("/camps/:id/increment", async (req, res) => {
@@ -299,7 +342,7 @@ async function run() {
   });
 
   // Participant's Analytics
-  app.get("/analytics/:email", async (req, res) => {
+  app.get("/analytics/:email", verifyToken, async (req, res) => {
     const { email } = req.params;
     if (!email) {
       return res
@@ -321,7 +364,7 @@ async function run() {
   });
 
   // Get all camps registered by a participant
-  app.get("/registered-camps/:email", async (req, res) => {
+  app.get("/registered-camps/:email", verifyToken, async (req, res) => {
     const { email } = req.params;
     const result = await participantCollection
       .find({ participantEmail: email })
@@ -330,7 +373,7 @@ async function run() {
   });
 
   // Cancel registration
-  app.delete("/cancel-registration/:id", async (req, res) => {
+  app.delete("/cancel-registration/:id", verifyToken, async (req, res) => {
     const { id } = req.params;
 
     const registration = await participantCollection.findOne({
@@ -359,17 +402,20 @@ async function run() {
     }
   });
 
-  // Get feedback for home page
+  // Feedback collection
   const feedbackCollection = client.db("mediCamp").collection("feedback");
+
+  // Get feedback for home page(Public)
   app.get("/feedback", async (req, res) => {
     const feedbacks = await feedbackCollection.find().toArray();
     res.status(200).send(feedbacks);
   });
 
   // Submit feedback
-  app.post("/submit-feedback", async (req, res) => {
+  app.post("/submit-feedback", verifyToken, async (req, res) => {
     const {
       campId,
+      campName,
       email: participantEmail,
       rating,
       feedback,
@@ -377,8 +423,15 @@ async function run() {
       photoURL,
     } = req.body;
 
+    if (!campId || !participantEmail || !feedback || !rating) {
+      return res
+        .status(400)
+        .send({ success: false, message: "All fields are required." });
+    }
+
     const feedbackData = {
       campId,
+      campName,
       participantEmail,
       rating,
       feedback,
@@ -386,19 +439,31 @@ async function run() {
       photoURL,
       date: new Date(),
     };
-    const result = await feedbackCollection.insertOne(feedbackData);
-    if (result.insertedId) {
-      res.status(201).send({ success: true, message: "Feedback submitted" });
-    } else {
-      res
-        .status(400)
-        .send({ success: false, message: "Failed to submit feedback" });
+
+    try {
+      const result = await feedbackCollection.insertOne(feedbackData);
+
+      if (result.acknowledged) {
+        res
+          .status(200)
+          .send({ success: true, message: "Feedback submitted successfully" });
+      } else {
+        res
+          .status(500)
+          .send({ success: false, message: "Feedback submission failed" });
+      }
+    } catch (error) {
+      console.error("Error submitting feedback:", error);
+      res.status(500).send({
+        success: false,
+        message: "Server error. Please try again later.",
+      });
     }
   });
 
   // Payment request
   const paymentCollection = client.db("mediCamp").collection("payments");
-  app.get("/payment/:id", async (req, res) => {
+  app.get("/payment/:id", verifyToken, async (req, res) => {
     const { id } = req.params;
     const result = await participantCollection.findOne({
       _id: new ObjectId(id),
@@ -413,7 +478,7 @@ async function run() {
   });
 
   // Stripe Payment Intent
-  app.post("/create-payment-intent", async (req, res) => {
+  app.post("/create-payment-intent", verifyToken, async (req, res) => {
     const { amount } = req.body;
 
     if (!amount || isNaN(amount)) {
@@ -435,7 +500,7 @@ async function run() {
   });
 
   // Handle payment and store payment history
-  app.post("/make-payment", async (req, res) => {
+  app.post("/make-payment", verifyToken, async (req, res) => {
     const { email, campId, campName, amount, transactionId } = req.body;
 
     if (!email || !campId || !amount || !transactionId) {
@@ -463,7 +528,7 @@ async function run() {
   });
 
   // Update payment status (participant)
-  app.put("/update-payment-status/:id", async (req, res) => {
+  app.put("/update-payment-status/:id", verifyToken, async (req, res) => {
     const { id } = req.params;
     const { paymentStatus } = req.body;
 
@@ -507,7 +572,7 @@ async function run() {
   });
 
   // Fetch payment history by participant email
-  app.get("/payment-history/:email", async (req, res) => {
+  app.get("/payment-history/:email", verifyToken, async (req, res) => {
     const { email } = req.params;
     const payments = await paymentCollection
       .find({ participantEmail: email })
@@ -517,6 +582,43 @@ async function run() {
       res.status(200).send({ success: true, data: payments });
     } else {
       res.status(404).send({ success: false, message: "No payments found" });
+    }
+  });
+
+  // Upcoming Events
+  app.get("/upcoming-events", async (req, res) => {
+    const lastCamps = await campCollection
+      .find()
+      .sort({ _id: -1 })
+      .limit(3)
+      .toArray();
+
+    res.status(200).send(lastCamps);
+  });
+
+  // Get feedback by participant email
+  app.get("/feedback/:email", verifyToken, async (req, res) => {
+    const { email } = req.params;
+    const feedbacks = await feedbackCollection
+      .find({ participantEmail: email })
+      .toArray();
+
+    res.status(200).send(feedbacks);
+  });
+
+  // Delete feedbacks
+  app.delete("/feedback/:id", verifyToken, async (req, res) => {
+    const { id } = req.params;
+    const result = await feedbackCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+    if (result.deletedCount === 1) {
+      res.status(200).send({ success: true, message: "Feedback deleted" });
+    } else {
+      res.status(404).send({
+        success: false,
+        message: "Feedback not found or already deleted",
+      });
     }
   });
 
