@@ -11,7 +11,7 @@ const port = process.env.PORT || 5000;
 // middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: ["http://localhost:5173", "https://medicamp-76a03.web.app"],
     credentials: true,
   })
 );
@@ -275,11 +275,10 @@ async function run() {
     res.send(result);
   });
 
-  // Delete participant (organizer dashboard)
+  // Delete participant
   app.delete(
     "/cancel-registration/:id",
     verifyToken,
-    verifyAdmin,
     async (req, res) => {
       const { id } = req.params;
       const result = await participantCollection.deleteOne({
