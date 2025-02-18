@@ -151,7 +151,7 @@ async function run() {
     const cursor = campCollection
       .find()
       .sort({ participantCount: -1 })
-      .limit(6);
+      .limit(8);
     const result = await cursor.toArray();
     res.send(result);
   });
